@@ -2,8 +2,8 @@
 
 ## v1 Specification
 
-**Status**: Draft
-**Date**: 2025-02-14
+**Status**: v1 Complete (all milestones M0–M10 done)
+**Date**: 2025-02-14 (spec), 2026-02-14 (v1 complete)
 
 ---
 
@@ -14,6 +14,34 @@
 Generated code lives in `code.lock/` — a pinned, reproducible output analogous to `package-lock.json`. The prompts are the source. The code is the build artifact.
 
 `lit` wraps `git`. Under the hood, git provides the storage layer (commits, branches, history, remotes). Lit provides a prompt-oriented workflow on top: it understands prompts, manages the generation pipeline, tracks the DAG, and presents a prompt-first interface. This means lit repos are valid git repos — they can be hosted on GitHub, use existing CI/CD, and interoperate with standard git tooling when needed.
+
+---
+
+## 1.1 Intended Workflows
+
+Lit is not a replacement for vibe-coding with AI agents. People don't write YAML frontmatter mid-flow — they talk to an AI and iterate on code. Lit is for what comes *after*, when you need accountability, reproducibility, and maintainability.
+
+### Explore → Capture (post-hoc formalization)
+
+Vibe-code something freely with your AI tool of choice. Once it works, write a prompt that describes the *intent* — what the code should do, what assumptions it makes, what contract it fulfills. Run `lit regenerate` to verify the prompt reproduces the code. Now you have a reproducible spec committed alongside the code.
+
+This is analogous to writing tests after a spike — you formalize after exploring.
+
+### Maintain → Evolve (prompt-driven changes)
+
+Requirements change. Instead of having a freeform AI conversation and hoping it modifies the right files correctly, you update the prompt — the requirements spec — and regenerate. The diff shows the *change in intent*, not just the change in implementation. Code review becomes review of requirements.
+
+### Onboard → Understand (prompts as documentation)
+
+New developers read `prompts/` to understand intent, not just implementation. Each prompt is a spec. The DAG shows how components relate.
+
+### Where lit is NOT useful
+
+- Throwaway prototypes and solo exploration
+- Codebases where nobody needs to understand why code exists
+- Workflows where the chat history IS the documentation
+
+Lit is useful when you have a **production codebase**, a **team**, and you need **accountability** for why code exists and what it's supposed to do.
 
 ---
 
@@ -103,7 +131,7 @@ name = "fastapi"
 version = "0.100"
 
 [model]
-provider = "anthropic"
+provider = "anthropic"   # "anthropic" or "openai"
 model = "claude-sonnet-4-5-20250929"
 temperature = 0.0
 seed = 42
@@ -111,7 +139,17 @@ seed = 42
 [model.api]
 # API key resolved from environment variable
 key_env = "LIT_API_KEY"
+
+[model.pricing]           # optional — override built-in cost estimation
+input_per_million = 3.0   # USD per million input tokens
+output_per_million = 15.0 # USD per million output tokens
 ```
+
+### 4.2 Pricing Configuration
+
+Lit includes built-in pricing tables for all supported models (Anthropic Claude and OpenAI GPT families). Neither provider exposes pricing via API, so these are hardcoded and updated with lit releases.
+
+When model pricing changes before a lit update, users can override it via `[model.pricing]` in `lit.toml`. When set, these values take precedence over the built-in table for all cost estimation in `lit cost` and generation records.
 
 ### 4.1 Mapping Modes
 
@@ -685,17 +723,20 @@ src/
     pull.rs
     clone.rs
     cost.rs
+    patch.rs
+    debug.rs
   core/
-    config.rs            # lit.toml parsing
+    config.rs            # lit.toml parsing (incl. PricingConfig)
     prompt.rs            # prompt parsing (frontmatter + body)
     dag.rs               # dependency resolution
     generator.rs         # LLM interaction and code generation
     cache.rs             # input-hash caching
     repo.rs              # repository operations (wraps git2)
-    diff.rs              # prompt-aware diffing logic
-    generation_record.rs # .lit/generations/ read/write
+    patch.rs             # manual patch tracking (3-way merge)
+    style.rs             # centralized colored terminal output
+    generation_record.rs # .lit/generations/ read/write + cost estimation
   providers/
-    mod.rs               # trait for LLM providers
-    anthropic.rs
-    openai.rs
+    mod.rs               # LlmProvider trait + GenerationRequest/Response
+    anthropic.rs         # Anthropic Messages API
+    openai.rs            # OpenAI Chat Completions API
 ```

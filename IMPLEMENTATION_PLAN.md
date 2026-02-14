@@ -324,9 +324,16 @@ def test_user():
 
 ---
 
-## Milestone 4: Input-Hash Caching
+## Milestone 4: Input-Hash Caching + Manual Patching
 
-**Goal**: Lit skips regenerating prompts that haven't changed.
+**Goal**: Lit skips regenerating unchanged prompts AND supports manual edits to generated code.
+
+### The Tension
+
+Regenerating 6 files to change `updated_at: datetime` to `Optional[datetime]` is wasteful. Small code fixes should not require burning thousands of LLM tokens. Lit needs to support two workflows:
+
+1. **Prompt-driven changes**: Edit a prompt → regenerate → code updates (the DAG path)
+2. **Manual patches**: Edit `code.lock/` directly for small fixes → lit tracks the patch
 
 ### Tasks
 
@@ -369,10 +376,67 @@ pub struct CachedGeneration {
 - Cache hit: returns stored output
 - Cache miss: returns None
 
+#### 4b. Manual patch tracking
+
+**Core concept**: `code.lock/` files can be hand-edited. Lit tracks these edits as "patches" and preserves them across regeneration where possible.
+
+**How it works**:
+
+1. **Detection**: `lit status` compares each `code.lock/` file against what the last generation produced (stored in `.lit/generations/` or cache). Files that differ have been manually patched.
+
+2. **Patch storage**: When lit detects a manual edit, it stores the diff as `.lit/patches/<output-path>.patch`. These patches are committed to git alongside prompts.
+
+3. **Regeneration with patches**: When `lit regenerate` runs:
+   - Generate fresh code from the LLM as normal
+   - For each output that has a stored patch, attempt to apply it (3-way merge)
+   - If the patch applies cleanly → apply it, print "Applied manual patch to src/schemas/user.py"
+   - If the patch conflicts → write both versions, print a warning, let the user resolve
+   - `--no-patches` flag to regenerate purely from prompts (discard all manual edits)
+
+4. **Patch lifecycle**:
+   - `lit patch save` — explicitly save current manual edits as patches
+   - `lit patch list` — show all tracked patches
+   - `lit patch drop <path>` — discard a patch (the prompt version wins)
+   - `lit patch promote <path>` — fold the patch back into the prompt (user edits the prompt to match)
+
+**Design principle**: Patches are temporary. They're escape hatches for quick fixes. The long-term goal is always to update the prompt so the LLM generates the right code. `lit patch promote` nudges users toward this.
+
+```rust
+pub struct PatchStore {
+    patches_dir: PathBuf,  // .lit/patches/
+}
+
+impl PatchStore {
+    pub fn detect_patches(
+        generated: &HashMap<PathBuf, String>,
+        actual: &HashMap<PathBuf, String>,
+    ) -> Vec<PatchInfo>;
+
+    pub fn save_patch(&self, output_path: &Path, diff: &str) -> Result<()>;
+    pub fn load_patch(&self, output_path: &Path) -> Option<String>;
+    pub fn apply_patch(&self, new_content: &str, patch: &str) -> Result<PatchResult>;
+    pub fn list_patches(&self) -> Vec<PathBuf>;
+    pub fn drop_patch(&self, output_path: &Path) -> Result<()>;
+}
+
+pub enum PatchResult {
+    Applied(String),       // Clean merge
+    Conflict(String),      // Conflict markers in content
+}
+```
+
+**Tests**:
+- Detect manual edit vs clean file
+- Save and load patch round-trip
+- Apply patch to unchanged base → clean apply
+- Apply patch to changed base → conflict detection
+- `--no-patches` ignores all patches
+
 ### Definition of Done
-- Cache computes stable hashes
-- Cache stores and retrieves generation outputs
-- Pipeline skips cached prompts
+- Cache computes stable hashes and skips unchanged prompts
+- `lit status` detects hand-edited code.lock files
+- Manual patches are preserved across regeneration
+- `--no-patches` flag for clean regeneration
 - All unit tests pass
 
 ---
@@ -838,21 +902,239 @@ Include proper error handling and HTTP status codes.
 
 ## Build Order Summary
 
-| Milestone | Delivers | Demo App Checkpoint | Est. |
-|-----------|----------|-------------------|------|
-| M0: Skeleton | CLI compiles, `lit --help` works | Create demo repo + all prompt files by hand | ½ day |
-| M1: Config + Prompts | Parse `lit.toml` and `.prompt.md` | Parse all 11 demo prompts | 1 day |
-| M2: DAG | Dependency graph + topological sort | Print demo app's DAG | 1 day |
-| M3: LLM + Pipeline | Call Anthropic, generate code | **First generation of demo app** → try running it | 2-3 days |
-| M4: Caching | Input-hash cache, skip unchanged | Modify 1 prompt, verify partial regen | ½ day |
-| M5: Gen Records | `.lit/generations/` metadata | Verify metadata for demo app generation | ½ day |
-| M6: Git Ops | `repo.rs` wrapping git2 | First `lit commit` on demo app | 2 days |
-| M7: Core CLI | End-to-end `init→commit→status→log` | **Full dogfood**: run the CRUD app with uvicorn | 2 days |
-| M8: Remaining CLI | regenerate, checkout, push/pull, cost | `lit cost` on demo app, checkout old version | 1-2 days |
-| M9: Polish | Colors, progress, errors | Test error paths with broken demo prompts | 1-2 days |
-| M10: Testing + Docs | Test suite, README | Demo app walkthrough in README | 1-2 days |
+| Milestone | Delivers | Demo App Checkpoint | Est. | Status |
+|-----------|----------|-------------------|------|--------|
+| M0: Skeleton | CLI compiles, `lit --help` works | Create demo repo + all prompt files by hand | ½ day | ✅ Done |
+| M1: Config + Prompts | Parse `lit.toml` and `.prompt.md` | Parse all 11 demo prompts | 1 day | ✅ Done |
+| M2: DAG | Dependency graph + topological sort | Print demo app's DAG | 1 day | ✅ Done |
+| M3: LLM + Pipeline | Call Anthropic, generate code | **First generation of demo app** → try running it | 2-3 days | ✅ Done |
+| M4: Caching + Patches | Input-hash cache + manual patch tracking | Modify 1 prompt → partial regen. Hand-edit code → preserved | 2 days | ✅ Done |
+| M5: Gen Records | `.lit/generations/` metadata | Verify metadata for demo app generation | ½ day | ✅ Done |
+| M6: Git Ops | `repo.rs` wrapping git2 | First `lit commit` on demo app | 2 days | ✅ Done |
+| M7: Core CLI | End-to-end `init→commit→status→log` | **Full dogfood**: run the CRUD app with uvicorn | 2 days | ✅ Done |
+| M8: Remaining CLI | checkout, push/pull, cost | `lit cost` on demo app, checkout old version | 1-2 days | ✅ Done |
+| M9: Polish | Colors, progress, errors | Test error paths with broken demo prompts | 1-2 days | ✅ Done |
+| M10: Testing + Docs | Test suite, README | Demo app walkthrough in README | 1-2 days | ✅ Done |
 
-**Total estimated: ~12-16 days of focused work**
+**Total estimated: ~14-18 days of focused work**
+
+---
+
+## Progress Log
+
+### M3 Learnings (from dogfooding lit-demo-crud)
+
+Issues discovered during first real generation that drove fixes:
+
+1. **LLM invents file paths**: System prompt didn't include declared output paths. LLM chose its own paths (`app/database.py` instead of `src/config/database.py`). **Fix**: Include output paths in system prompt + positional remapping fallback in parser.
+
+2. **Context not flowing**: `generated_code` map keys didn't match import lookups because of path mismatches. **Fix**: Path remapping in `parse_response()`.
+
+3. **Markdown fences in output**: LLM wraps code in ```python fences inside `=== FILE: ===` sections. **Fix**: `strip_markdown_fences()` in parser + system prompt rule.
+
+4. **Missing `__init__.py`**: Python package structure needs init files but no prompt generated them. **Fix**: Added `structure.prompt.md` as DAG root — prompts generate ALL project files.
+
+5. **Import path inconsistency**: Without context, downstream prompts guessed different import styles (`from config.database` vs `from src.config.database`). **Fix**: Structure prompt establishes `src.` convention, flows through DAG as context.
+
+6. **Double router prefix**: `app.py` sets `prefix="/users"` AND `users.py` sets `prefix="/users"` → routes at `/users/users/`. **Fix**: Updated router prompts to use no prefix.
+
+7. **Schema/model mismatch**: `UserResponse` requires `updated_at: datetime` but model uses `onupdate=func.now()` (None until first update) → 500 error. **Fix**: Updated schema prompt to specify `Optional[datetime]`.
+
+**Key insight**: Small code fixes (adding `Optional`, removing a prefix) require regenerating the prompt + all dependents, burning thousands of tokens for a one-line change. **This is the fundamental tension** that M4's manual patching system addresses.
+
+### M4 Implementation Notes
+
+**4a. Input-hash caching**:
+- Cache stores JSON files in `.lit/cache/<sha256>.json` with `CachedGeneration` structs (files map, token counts)
+- Input hash: SHA-256 of (version tag `lit-cache-v1` + prompt raw content + sorted import hashes + model config + language + framework)
+- Import hashes cascade: if an upstream prompt's hash changes, all downstream hashes change automatically
+- Hash computed for ALL prompts in DAG order (even skipped ones), so downstream hashes are always correct
+- `--no-cache` flag skips cache entirely (forces fresh LLM calls)
+- Cache summary in output: "Cache: X hit(s), Y miss(es)"
+
+**4b. Manual patch tracking**:
+- `PatchStore` manages `.lit/patches/<output-path>.patch` files (JSON with original content, manual content, unified diff)
+- `lit patch save` detects manual edits by comparing cache content vs disk content
+- `lit patch list` shows all tracked patches with line counts
+- `lit patch drop <path>` discards a patch
+- `lit patch show <path>` displays the unified diff
+- During `lit regenerate`, saved patches are applied via 3-way merge:
+  - If no overlap → clean apply, both user edits and LLM changes preserved
+  - If overlap → conflict markers written, user resolves manually
+- After successful apply, patch is updated with new base (so next regen has correct original)
+- `--no-patches` flag skips all patch application
+- 12 new unit tests for PatchStore (detect, save/load, apply, conflict, list, drop)
+
+**Test count**: 86 total (82 unit + 4 integration)
+
+### M5 Implementation Notes
+
+**Generation records**:
+- `GenerationRecord` stored as JSON in `.lit/generations/<YYYYMMDD-HHMMSS>.json`
+- Each record captures: timestamp, project name, model config, per-prompt metadata, aggregate summary
+- `PromptRecord` per prompt: path, output files, input hash, from_cache flag, tokens, duration, model, cost
+- `GenerationSummary` aggregates: total prompts, cache hits/misses, skipped, tokens, cost, duration, files written, patches applied/conflicted
+- Cost estimation via `estimate_cost()` with known model pricing tables (Claude Sonnet/Haiku/Opus, GPT-4o/mini/4)
+- Display helpers: `format_cost()` and `format_tokens()` with comma separators and million abbreviations
+- `lit cost` command: shows aggregate across all runs, `--last` for most recent, `--breakdown` for per-prompt/per-generation details
+- Generation records written automatically after each `lit regenerate` run
+- 12 new unit tests for generation records (serialize/deserialize, write/read, list, latest, cost estimation, formatting)
+
+**Test count**: 98 total (94 unit + 4 integration)
+
+### M6/M7/M8 Implementation Notes (Git Operations + CLI)
+
+**repo.rs — LitRepo git wrapper**:
+- Full git2 wrapper: init, open (with `Repository::discover`), stage_all, stage_file, commit (initial + normal), head_commit, log, status, diff (with pathspec filtering), checkout_ref, write_gitignore
+- `stage_all()` stages: prompts/**, code.lock/**, lit.toml, .lit/generations/**, .lit/patches/**, .gitignore
+- `status()` categorizes changes into prompts (new/modified/deleted), code (new/modified), config, other
+- `diff_pathspec()` includes origin characters (+, -, space) for proper unified diff output
+- Paths canonicalized in init/open to handle macOS `/var` → `/private/var` symlink
+- Default signature falls back to "lit"/"lit@localhost" if git config not set
+- 9 unit tests covering all operations
+
+**CLI commands implemented**:
+- `lit init [--defaults]` — Creates lit.toml (if missing), prompts/, code.lock/, .lit/, git init, .gitignore, initial commit. Handles existing lit.toml without git repo (just inits git).
+- `lit add <path>` — Validates .prompt.md files, warns if not in prompts/. Directory walk for bulk validation.
+- `lit commit -m "msg"` — stage_all → has_changes check → commit → summary with categorized counts
+- `lit status` — Shows project name/version, HEAD commit, prompt count, categorized changes
+- `lit diff [--code] [--all]` — Default: prompts/ only. --code: code.lock/. --all: everything.
+- `lit log [-n N]` — Commit history with short hash, datetime, message. Default limit 10.
+- `lit checkout <ref>` — Checks for uncommitted changes, then checkout_ref via git2
+- `lit push` — Shells out to `git push` (git2 transport is complex)
+- `lit pull` — Shells out to `git pull` (same reason)
+- `lit clone <url>` — Shells out to `git clone`, validates lit.toml in result
+
+**Design decisions**:
+- Push/pull/clone shell out to system git rather than using git2's transport layer. Git2 requires complex SSH agent and credential helper setup. System git handles all of this natively.
+- `lit init` is idempotent for git: if .git exists, opens it rather than re-initializing
+- `lit checkout` requires a clean working tree to prevent data loss
+
+**Test count**: 108 total (104 unit + 4 integration)
+
+### M9 Implementation Notes (Polish + Error Handling)
+
+**Centralized style system (`core/style.rs`)**:
+- Created `style.rs` with ~30 formatting functions for consistent colored terminal output
+- Categories: status indicators (✓ green, ⚠ yellow, ✗ red), file change indicators (+/-/~), progress counters, summary formatting, section headers, patch indicators
+- All CLI commands use these helpers instead of inline formatting
+- Uses `colored` crate v3 with `.bold()`, `.dimmed()`, `.green()`, `.yellow()`, `.red()`, `.cyan()`
+
+**Colored output applied to all CLI commands**:
+- `lit status` — Colored project header, commit hash (yellow), file changes (green/yellow/red), bold section headers
+- `lit init` — Green checkmarks, yellow commit hashes, cyan command suggestions in "Next steps"
+- `lit commit` — Green checkmark + yellow hash, colored change category counts
+- `lit log` — Yellow commit hashes, dimmed timestamps
+- `lit diff` — "No changes" messages with dimmed text
+- `lit cost` — Header with `===`, yellow cost values, green/yellow cache stats
+- `lit add` — Green "Tracked:" labels, yellow warnings for files outside prompts/
+- `lit checkout` — Green checkmark + commit hash + message
+- `lit regenerate` — Colored header with prompt count, progress indicators, colored summary
+
+**Generator pipeline progress indicators**:
+- Cache hit: `✓` (green) + path + `(cached)` (dimmed) + progress counter
+- Generating: `Generating` (cyan) + bold path + dimmed context count + progress counter `(1/12)`
+- Result: `✓` (green) + bold file count + dimmed token stats + dimmed duration
+- Warnings: `⚠` (yellow) + dimmed message
+
+**Improved error messages with hints**:
+- All `anyhow::bail!()` calls include `\nHint:` with actionable suggestions
+- Missing prompts directory → "Create prompts/ and add .prompt.md files"
+- Empty prompts directory → "Add .prompt.md files to prompts/"
+- Missing API key → "Set LIT_API_KEY environment variable"
+- Unsupported provider → "Currently supported: anthropic"
+- File not found → "Check the path and try again"
+- Not a prompt file → "Lit only tracks prompt files (*.prompt.md)"
+
+**Edge cases handled**:
+- `lit init` with existing lit.toml but no .git → initializes git only
+- `lit init` with both lit.toml and .git → clear error with hint to use `lit status`
+- `lit add` on directory with no prompt files → yellow warning
+- `lit checkout` with uncommitted changes → error with hint to commit first
+- `lit status` with no git repo → hint to run `lit init`
+
+**Test count**: 108 total (104 unit + 4 integration) — unchanged, polish was output-only
+
+### M10 Implementation Notes (Testing + Documentation)
+
+**New integration tests (`tests/workflow_test.rs` — 16 tests)**:
+- `test_full_workflow` — End-to-end: init → add prompt → status → commit → modify → status → commit → log → checkout → roundtrip
+- `test_dag_cascade_regeneration` — A → B → C DAG: change A cascades to all 3, change B cascades to B+C, change C only regens C
+- `test_cache_hit_miss` — Cache put/get round-trip, same-input → same-hash, different-input → different-hash
+- `test_generation_record_roundtrip` — Write generation record to JSON, read back, verify all fields
+- `test_cost_estimation` — Known models have non-zero cost, unknown models use fallback pricing
+- `test_error_recovery_bad_prompt` — Bad import → DAG fails → fix prompt → DAG succeeds
+- `test_multi_commit_log` — 5 commits then log with limit verification
+- `test_response_parser_complex` — Multi-file response with empty file and multiple outputs
+- `test_status_detects_code_edits` — Hand-edit code.lock/ file → status shows code_modified
+- `test_config_parsing` — Parse lit.toml and verify all fields
+- `test_find_and_load_walks_up` — find_and_load from nested a/b/c/ finds root lit.toml
+- `test_prompt_parsing_validation` — Parse .prompt.md, verify frontmatter outputs and body
+- `test_discover_prompts_filtering` — Only finds .prompt.md files, ignores .md and .txt
+- `test_checkout_roundtrip` — v1 → v2 → v3, checkout v1, checkout v2, verify content
+- `test_diff_clean_tree` — Diff is empty after commit (clean tree)
+- `test_stage_all_deleted_files` — Delete a prompt, stage_all picks up deletion, commit succeeds
+
+**Real API integration test (`tests/api_integration_test.rs` — 1 test, ignored by default)**:
+- `test_real_api_single_prompt` — Creates a project with one prompt, calls real Anthropic API, validates:
+  - API returns valid response with non-zero tokens
+  - Response parser extracts correct output file
+  - Generated code contains expected functions with type hints
+  - Second run hits cache (no API call needed)
+  - Cached output matches original
+- Run with: `cargo test -- --ignored` (requires LIT_API_KEY)
+
+**`lit --version`**: Already supported via clap's `#[command(version)]` on the Cli struct. Shows `lit 0.1.0`.
+
+**README.md**: Quick start guide covering:
+- Installation from source
+- Project setup (`lit init`)
+- Prompt format with frontmatter
+- Generate-and-commit workflow
+- `lit.toml` configuration reference
+- Full command reference table
+- Manual patching workflow
+- Project structure overview
+- Testing instructions
+
+**Test count**: 125 total (104 unit + 4 demo integration + 16 workflow integration + 1 ignored API test)
+
+### Post-M10 Polish
+
+**Compiler warnings eliminated**:
+- All 17 compiler warnings fixed with targeted `#[allow(dead_code)]` on pub API items not yet used by the binary but part of the library surface
+- Zero warnings across `cargo build` and `cargo test`
+
+**Dead code cleanup**:
+- Removed vestigial `core/diff.rs` (2-line TODO stub, nothing imported it). Diff functionality lives in `repo.rs` and `cli/diff.rs`.
+
+**OpenAI provider implemented** (`providers/openai.rs`):
+- Full Chat Completions API implementation (`/v1/chat/completions`)
+- System prompt as system role message, user prompt + context as user message
+- Passes seed through to API for reproducibility
+- Error handling: auth failures (401), rate limits (429), server errors (5xx), empty responses
+- Wired into `regenerate.rs` provider selection: `"openai" => Box::new(OpenAiProvider::new(api_key))`
+
+**Configurable pricing** (`config.rs` + `generation_record.rs`):
+- Added optional `[model.pricing]` section to `lit.toml` for overriding built-in cost estimation
+- `estimate_cost()` accepts an optional `ModelPricing` override from config
+- Updated built-in pricing to Feb 2026 values:
+  - Added Opus 4.5/4.6 tier ($5/$25 — was incorrectly grouped with Opus 4 at $15/$75)
+  - Added Haiku 4.5 tier ($1/$5)
+  - Added Haiku 3 tier ($0.25/$1.25)
+- Neither Anthropic nor OpenAI expose pricing via API — everyone hardcodes
+- 4 new tests: config parsing with/without pricing, cost override, Opus tier separation
+
+**Test count**: 129 total (108 unit + 4 demo integration + 16 workflow integration + 1 ignored API test)
+
+### Workflow Clarification (SPEC + README updated)
+
+Lit is not a replacement for vibe-coding with AI agents. It's for what comes *after*:
+1. **Explore → Capture**: Vibe-code freely, then write prompts to formalize intent (like writing tests after a spike)
+2. **Maintain → Evolve**: Change the prompt (requirements), regenerate, review the diff of intent
+3. **Onboard → Understand**: New devs read prompts/ as specs, not just code
+
+Best suited for production codebases with teams who need accountability for why code exists.
 
 ---
 
@@ -860,9 +1142,11 @@ Include proper error handling and HTTP status codes.
 
 | Risk | Mitigation |
 |------|------------|
-| LLM response parsing is fragile | Use strict delimiter format, validate outputs against frontmatter, clear error on parse failure |
+| LLM response parsing is fragile | Use strict delimiter format, validate outputs against frontmatter, clear error on parse failure. Path remapping fallback. Markdown fence stripping. |
 | git2 crate has complex API | Build repo.rs early (M6), isolate all git complexity there |
 | Non-deterministic LLM output | Pin model+temp+seed, store outputs in commits, cache by input hash |
 | Large generated codebases bloat git | Future concern — v1 accepts this tradeoff. Git LFS or shallow clones could help later. |
 | Anthropic API rate limits | Implement exponential backoff in provider. Limit concurrent DAG-level parallelism. |
 | comrak doesn't parse YAML frontmatter directly | Split on `---` manually before feeding to comrak. Frontmatter parsing is separate from markdown parsing. |
+| **Small fixes are expensive** | Manual patch system (M4b) lets users hand-edit code.lock and preserve patches across regeneration. Patches are temporary — the goal is always to improve the prompt. |
+| **LLM context drift** | Structure prompt at DAG root establishes project conventions. All imports flow as context through the DAG, keeping code consistent. |
