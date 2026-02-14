@@ -2,8 +2,8 @@
   <img src="assets/lit-logo.svg" alt="lit" width="240" />
 </p>
 
-<h3 align="center">Prompt-first version control</h3>
-<p align="center"><em>prompts are source, code is the artifact</em></p>
+<h3 align="center">Version control with good vibes</h3>
+<p align="center"><em>Prompts are source, code is the artifact</em></p>
 
 <p align="center">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
@@ -27,65 +27,68 @@
 - is short for "literature", which is suggestive of its natural-language source of truth rather than programming languages
 - evokes the "vibes" that make up the coding
 
+So the name does fit very well, but it is also unfortunately the name of a well-known [web development framework](https://github.com/lit/lit) with 21.2k GitHub stars, so it will probably have to change. 
+
 ## Why Lit?
 
 It's no longer a problem for the future: generated code is beginning to form a large part of production code bases *today*. Most serious companies are still extremely wary of "opening the floodgates" of "vibe code reviews" though, so generated code must be pored over and studied by engineers. This despite everyone harping on about how LLMs give us a new paradigm similar to how compiled languages replaced assembly. 
 
 `lit` is an attempt to address that problem by "making prompts commitable and diffable". 
 
-People won't vibe-code with prompt files and YAML frontmatter. They talk to AI agents and the agent changes files. That's fine — `lit` is not a replacement for that workflow, it is for what comes *after* when those generated files have to actually form part of a production code base. 
+People won't vibe-code with prompt files and YAML frontmatter. They talk to AI agents and the agent changes files. That's fine, `lit` is not a replacement for that workflow, but for what comes after: when those generated files have to actually form part of a production code base. 
 
 ### The problem
 
-You vibe-coded a feature with Claude/Cursor/Copilot. It works. Six months later, someone asks "why does this code exist?" and nobody knows. The chat history is gone, the AI session is lost, and the code is opaque. In a production codebase with a team, this is a real problem.
+You vibe-coded a feature with Claude/Cursor/Copilot and it works and makes it to production. Six months later, someone asks "why does this code exist?" and nobody knows. The chat history is gone, the AI session is lost, and the code is opaque. 
 
-### Where `lit` fits
+### How `lit` can help
 
-**Lit is for capturing, maintaining, and reproducing intent.**
+**`lit` is for capturing, maintaining, and reproducing intent.**
+**If you use it properly, it can truly make the prompts the source of truth for your project, and function as a living specification of the code. Code can truly become an artifact, like a giant `uv.lock` file.**
 
-There are three workflows where lit makes sense:
+Here are some workflows where `lit` makes sense:
 
-#### 1. Explore → Capture (post-hoc formalization)
+#### 1. Post-hoc formalization of "vibe coding"
 
-You vibe-code something freely. Once it works, you write the prompt that describes the *intent* — what this code should do, what assumptions it makes, what contract it fulfills. Then you run `lit regenerate` to verify the prompt actually reproduces the code. Now you have a reproducible spec committed alongside the code.
+Vibe-code something freely, and once it works, write the prompt that describes the *intent* — what this code should do, what assumptions it makes, what contract it fulfills. Then run `lit regenerate` to verify the prompt actually reproduces the code. This command actually handles the generation of the code (integration with LLMs). Now you have a reproducible (insofar as LLMs can be) spec committed alongside the code.
 
-This is like writing tests after a spike. You formalize after exploring.
+This is sort of like writing tests after prototyping something. 
 
 ```bash
 # After vibe-coding a feature that works:
-vim prompts/auth/login.prompt.md     # Describe the intent
-lit regenerate                       # Verify it reproduces
+vi prompts/auth/login.prompt.md      # Describe the intent...
+lit regenerate                       # Verify it reproduces. 
 lit diff --code                      # Compare generated vs hand-written
 lit commit -m "Capture login intent"
 ```
 
-#### 2. Maintain → Evolve (prompt-driven changes)
+#### 2. Prompt-driven changes
 
 Requirements change. Instead of asking an AI to "update this code" and hoping it gets it right, you change the prompt — the requirements spec — and regenerate. The diff shows the *change in intent*, not just the change in code. Code review becomes review of requirements.
 
 ```bash
-vim prompts/models/user.prompt.md   # Add a new field
-lit regenerate                      # Code updates automatically
+vi prompts/models/user.prompt.md    # Add a new field to the schema
+lit regenerate                      # Regenerate the code
 lit diff                            # See the intent change
 lit diff --code                     # See the code change
 lit diff --summary                  # See DAG impact analysis
 lit commit -m "Add user avatar field"
 ```
 
-#### 3. Onboard → Understand (prompts as documentation)
+#### 3. Prompts as documentation
 
-A new developer reads `prompts/` to understand intent, not just implementation. Each prompt file is a spec for what its generated code should do. The DAG shows how components relate.
+A new developer reads `prompts/` to understand intent, not just implementation. Each prompt file is a spec for what its generated code should do. The DAG (see below for implementation details: `lit` uses a [DAG](https://en.wikipedia.org/wiki/Directed_acyclic_graph) to model the connections between prompts and the code files they generate) shows how components relate.
 
 ```bash
 lit debug dag                       # See how prompts depend on each other
 cat prompts/api/users.prompt.md     # Read the spec for the users endpoint
 ```
 
-### What lit is NOT
+### What `lit` is NOT
 
 - Not a replacement for vibe-coding or AI agents
 - Not an IDE plugin or chat interface
-- Not useful for throwaway prototypes or solo exploration
+- Not particularly useful for throwaway prototypes or solo exploration
 
 Lit is useful when you have a **production codebase**, a **team**, and you need **accountability** for why code exists and what it's supposed to do.
 
@@ -95,6 +98,8 @@ Lit is useful when you have a **production codebase**, a **team**, and you need 
 
 ### Install
 
+`lit` is written in Rust. You need to install [Rust](https://github.com/rust-lang/rust) 1.86+ in order to build it from source. 
+
 ```bash
 # From source (requires Rust 1.86+)
 git clone https://github.com/clintonboys/lit && cd lit
@@ -102,6 +107,8 @@ cargo install --path .
 ```
 
 ### Set up your API key
+
+Currently, `lit` requires an API key for a frontier LLM provider to be able to generate code. At present, Anthropic (Claude) and OpenAI (GPT) are supported. 
 
 ```bash
 export LIT_API_KEY=sk-ant-...  # Anthropic API key
@@ -121,7 +128,7 @@ This creates:
 - `prompts/` — where your prompt files live
 - `code.lock/` — where generated code is written
 - `.lit/` — internal state (cache, generation records)
-- `.git` — git repository with initial commit
+- `.git` — git repository with initial commit: `lit` uses `git` for its storage layer and wraps all common git commands. 
 
 ### Write a prompt
 
