@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 140" width="320" height="140">
+  <!-- Flame icon -->
+  <g transform="translate(40, 10)">
+    <!-- Outer flame -->
+    <path d="M30 110 C30 110, 2 78, 14 48 C19 34, 24 26, 30 8 C36 26, 41 34, 46 48 C58 78, 30 110, 30 110Z"
+          fill="#ff6b35"/>
+    <!-- Mid flame -->
+    <path d="M30 110 C30 110, 12 85, 20 60 C23 50, 27 42, 30 28 C33 42, 37 50, 40 60 C48 85, 30 110, 30 110Z"
+          fill="#f7c948"/>
+    <!-- Inner flame -->
+    <path d="M30 110 C30 110, 20 95, 24 78 C26 70, 28 64, 30 52 C32 64, 34 70, 36 78 C40 95, 30 110, 30 110Z"
+          fill="#fff4a3"/>
+  </g>
+
+  <!-- "l" letter as path -->
+  <g fill="#2d3748">
+    <rect x="110" y="30" width="14" height="80" rx="2"/>
+  </g>
+
+  <!-- "i" letter as path -->
+  <g fill="#2d3748">
+    <!-- dot -->
+    <circle cx="152" cy="38" r="8"/>
+    <!-- stem -->
+    <rect x="145" y="54" width="14" height="56" rx="2"/>
+  </g>
+
+  <!-- "t" letter as path -->
+  <g fill="#2d3748">
+    <!-- vertical -->
+    <rect x="183" y="36" width="14" height="74" rx="2"/>
+    <!-- crossbar -->
+    <rect x="173" y="54" width="34" height="12" rx="2"/>
+  </g>
+</svg>
