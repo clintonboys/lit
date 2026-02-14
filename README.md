@@ -17,17 +17,29 @@
 
 ---
 
-Lit is a CLI tool that treats `.prompt.md` files as the source of truth and generates code from them using LLMs. Generated code lives in `code.lock/` and is committed alongside prompts in git. Think of it as a version-controlled code generation pipeline.
+`lit` is a version control system that treats LLM agent prompts as the source of truth for software projects. Generated code lives in a `code.lock/` directory and is committed alongside prompts in git. The code generation itself is also handled by `lit`. 
+
+## The name
+
+`lit` is a working title, meant to evoke three separate sources of inspiration for the project:
+
+- sounds similar to `git`, which is its spiritual predecessor and which provides much of its low-level functionality
+- is short for "literature", which is suggestive of its natural-language source of truth rather than programming languages
+- evokes the "vibes" that make up the coding
 
 ## Why Lit?
 
-People don't vibe-code with prompt files and YAML frontmatter. They talk to an AI agent and the agent changes files. That's fine — lit is not a replacement for that workflow. Lit is for what comes *after*.
+It's no longer a problem for the future: generated code is beginning to form a large part of production code bases *today*. Most serious companies are still extremely wary of "opening the floodgates" of "vibe code reviews" though, so generated code must be pored over and studied by engineers. This despite everyone harping on about how LLMs give us a new paradigm similar to how compiled languages replaced assembly. 
+
+`lit` is an attempt to address that problem by "making prompts commitable and diffable". 
+
+People won't vibe-code with prompt files and YAML frontmatter. They talk to AI agents and the agent changes files. That's fine — `lit` is not a replacement for that workflow, it is for what comes *after* when those generated files have to actually form part of a production code base. 
 
 ### The problem
 
 You vibe-coded a feature with Claude/Cursor/Copilot. It works. Six months later, someone asks "why does this code exist?" and nobody knows. The chat history is gone, the AI session is lost, and the code is opaque. In a production codebase with a team, this is a real problem.
 
-### Where lit fits
+### Where `lit` fits
 
 **Lit is for capturing, maintaining, and reproducing intent.**
 
@@ -41,7 +53,7 @@ This is like writing tests after a spike. You formalize after exploring.
 
 ```bash
 # After vibe-coding a feature that works:
-vim prompts/auth/login.prompt.md    # Describe the intent
+vim prompts/auth/login.prompt.md     # Describe the intent
 lit regenerate                       # Verify it reproduces
 lit diff --code                      # Compare generated vs hand-written
 lit commit -m "Capture login intent"
@@ -53,7 +65,7 @@ Requirements change. Instead of asking an AI to "update this code" and hoping it
 
 ```bash
 vim prompts/models/user.prompt.md   # Add a new field
-lit regenerate                       # Code updates automatically
+lit regenerate                      # Code updates automatically
 lit diff                            # See the intent change
 lit diff --code                     # See the code change
 lit diff --summary                  # See DAG impact analysis
