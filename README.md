@@ -17,7 +17,9 @@
 
 ---
 
-`lit` is a version control system that treats LLM agent prompts as the source of truth for software projects. Generated code lives in a `code.lock/` directory and is committed alongside prompts in git. The code generation itself is also handled by `lit`. 
+`lit` is a version control system that treats LLM agent prompts as the source of truth for software projects. Generated code lives in a `code.lock/` directory and is committed alongside prompts in git. The code generation itself is also handled by `lit`.
+
+> **Note**: `lit` is currently **v1** — a working proof of concept with real limitations. See [Limitations and Future Work](#limitations-and-future-work) below. 
 
 ## The name
 
@@ -247,7 +249,7 @@ Use the Base class from @import(prompts/models/base.prompt.md).
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `outputs` | Yes (manifest mode) | List of files this prompt generates |
+| `outputs` | **Yes** | List of files this prompt generates (see [limitations](#limitations-and-future-work)) |
 | `imports` | No | Other prompts whose generated code is passed as context |
 | `model` | No | Per-prompt model override (`model`, `temperature`, `seed`) |
 | `language` | No | Override the project default language |
@@ -369,6 +371,34 @@ See [lit-demo-crud](https://github.com/clintonboys/lit-demo-crud) — a complete
 - Database config + package structure
 
 Every line of Python was generated from prompts. Clone it, set your API key, run `lit regenerate`.
+
+---
+
+## Limitations and Future Work
+
+### v1: You have to declare your outputs
+
+The main limitation of v1 is that every prompt must explicitly declare the files it will generate in its YAML frontmatter:
+
+```yaml
+outputs:
+  - src/models/user.py
+  - tests/test_user.py
+```
+
+This means the prompt author needs to know the output file paths *before* the LLM generates anything. It works well when you're formalizing existing code or when you have a clear project structure in mind, but it's rigid — especially for exploratory workflows where you'd rather say "build me a user system" and let the LLM decide how to structure it.
+
+This is a deliberate trade-off. Declaring outputs up front is what makes the rest of `lit` work cleanly: the DAG can be resolved before generation, caching can be content-addressed, and no two prompts can accidentally claim the same file. But it's also the main thing that makes `lit` feel heavy compared to just talking to an AI agent.
+
+### Future: removing the output declaration burden
+
+The most promising direction is **two-pass generation**: a cheap first pass asks the LLM "what files would you produce for this prompt?", and `lit` records the answer as a manifest. The second pass does the actual generation against that manifest. This preserves all the benefits of knowing outputs ahead of time (DAG resolution, caching, conflict detection) while removing the burden from the prompt author.
+
+Other directions being considered:
+
+- **Output discovery with pinning**: let the first generation be "open", then pin whatever was produced for future regenerations
+- **Convention-based inference**: derive output paths from prompt paths automatically (e.g., `prompts/models/user.prompt.md` always generates `src/models/user.py`)
+- **Sub-file merging**: multiple prompts contributing to the same file via AST-aware merging (listed in the [spec](SPEC.md) as future work)
 
 ---
 
